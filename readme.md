@@ -21,11 +21,12 @@ TBA
 
 # How to run project
 * Build the Spring Boot application -> _./mvnw clean package_
-* Build Docker container -> _docker build -t thanos-exporter ._
-* Run the Docker container ->  _docker run -p 8080:8080 thanos-exporter_
-* OR  _docker-compose up -d_ 
+* Build Docker container ->  _docker-compose up --build_ 
 * Cleanup -> _docker-compose down -v_
+* Verify metrics coming locally both from Thanos and Prometheus from following endpoints 
+  1. Local Thanos Querier  http://localhost:9091
+  2. Local PromQl http://localhost:9090
 
 # TODOs
-* Add an extra label i.e. exporterName, reference of senderApp
-* Add more logging when got error responses from thanos receiver 
+* configure S3 locally using minio
+* explore other 2, 4 options 

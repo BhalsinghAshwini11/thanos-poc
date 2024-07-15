@@ -76,5 +76,3 @@ networks:
 volumes:
   thanos-receive-data:
   thanos-store-data:
-
-# Local Thanos Querier http://localhost:9091
