@@ -4,6 +4,7 @@ import com.prometheus.thanos.exporter.poc.WriteRequestOuterClass;
 import io.micrometer.core.instrument.Clock;
 import io.micrometer.core.ipc.http.HttpSender;
 import io.micrometer.core.ipc.http.HttpUrlConnectionSender;
+import okhttp3.*;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,13 +18,14 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 @Component
 public class ScheduledMetricsExporter {
     private static final Logger LOGGER = LoggerFactory.getLogger(ScheduledMetricsExporter.class);
 
-    // private final OkHttpClient okHttpClient;
+    private final OkHttpClient okHttpClient;
     private final HttpSender httpClient;
 
     @Value("${thanos.receive.url}")
@@ -32,27 +34,35 @@ public class ScheduledMetricsExporter {
     @Value("${prometheus.url}")
     private String prometheusUrl;
 
+    @Value("${scheduler.job.enabled}")
+    private boolean schedulerJobEnabled;
+
     private final Clock clock;
 
     public ScheduledMetricsExporter(Clock clock) {
         this.clock = clock;
         httpClient = new HttpUrlConnectionSender();
+        okHttpClient = new OkHttpClient();
     }
 
     @Scheduled(fixedRateString = "${scheduler.fixedRate}", initialDelayString = "${scheduler.initialDelay}")
     public void reportCurrentTime() throws IOException {
+        if (schedulerJobEnabled) {
+            long startTime = clock.monotonicTime();
+            LOGGER.debug("Schedule trigger for exporting metrics started");
 
-        long startTime = clock.monotonicTime();
-        LOGGER.debug("Schedule trigger for exporting metrics started");
+             String metrics = fetchPrometheusMetricsViaHttpSender();
+           // String metrics = fetchPrometheusMetricsViaHttpOkClient();
 
-        String metrics = fetchPrometheusMetricsViaHttpSender();
+            WriteRequestOuterClass.WriteRequest writeRequest = convertMetricsToProtobuf(metrics);
 
-        WriteRequestOuterClass.WriteRequest writeRequest = convertMetricsToProtobuf(metrics);
+            postMetricsToThanosViaHttpSender(writeRequest);
+            //postMetricsToThanosViaHttpSender(writeRequest);
 
-        postMetricsToThanosViaHttpSender(writeRequest);
-        //postMetricsToThanos2(writeRequest);
-
-        LOGGER.info("Schedule trigger for exporting metrics took={}ms", calculateFinishTime(startTime));
+            LOGGER.info("Schedule trigger for exporting metrics took={}ms", calculateFinishTime(startTime));
+        } else {
+            LOGGER.info("Thanos exporter job disabled");
+        }
     }
 
     @NotNull
@@ -106,47 +116,37 @@ public class ScheduledMetricsExporter {
     }
 
     /* Fetch Prometheus metrics exposed locally, using HttpOkClient it works */
-//    private String fetchPrometheusMetricsViaHttpOkClient() {
-//        Request request = new Request.Builder().url(prometheusUrl).build();
-//
-//        try (Response response = okHttpClient.newCall(request).execute()) {
-//            if (!response.isSuccessful())
-//                throw new IOException(String.format("Unsuccessful attempt when fetching metrics from: %s due to: ", prometheusUrl) + response);
-//            return Objects.requireNonNull(response.body()).string();
-//        } catch (Throwable e) {
-//            throw new RuntimeException(String.format("Failed to fetch metrics from endpoint: %s", prometheusUrl), e);
-//        }
-//    }
+    private String fetchPrometheusMetricsViaHttpOkClient() {
+        Request request = new Request.Builder().url(prometheusUrl).build();
 
-    /* Export protobuf converted prometheus metrics to Thanos, using okHttpClient
-    TODO Does not work some parsing error
-    *
-    * Caused by: java.io.EOFException: \n not found: limit=15 content=000006040000000000000500004000…
-	at okio.RealBufferedSource.readUtf8LineStrict(RealBufferedSource.kt:339) ~[okio-jvm-3.9.0.jar:na]
-	at okhttp3.internal.http1.HeadersReader.readLine(HeadersReader.kt:29) ~[okhttp-5.0.0-alpha.14.jar:na]
-	at okhttp3.internal.http1.Http1ExchangeCodec.readResponseHeaders(Http1ExchangeCodec.kt:188) ~[okhttp-5.0.0-alpha.14.jar:na]
+        try (Response response = okHttpClient.newCall(request).execute()) {
+            if (!response.isSuccessful())
+                throw new IOException(String.format("Unsuccessful attempt when fetching metrics from: %s due to: ", prometheusUrl) + response);
+            return Objects.requireNonNull(response.body()).string();
+        } catch (Throwable e) {
+            throw new RuntimeException(String.format("Failed to fetch metrics from endpoint: %s", prometheusUrl), e);
+        }
+    }
 
-    * */
-//    private void postMetricsToThanos(WriteRequestOuterClass.WriteRequest writeRequest) throws IOException {
-//
-//        byte[] compressedData = compressedData(writeRequest.toByteArray());
-//
-//        RequestBody body = RequestBody.create(compressedData, MediaType.parse("application/x-protobuf"));
-//
-//        Request request = new Request.Builder()
-//                .url(thanosReceiveUrl)
-//                .post(body)
-//                .addHeader("Content-Type", "application/x-protobuf")
-//                .build();
-//
-//        try (Response response = okHttpClient.newCall(request).execute()) {
-//            if (!response.isSuccessful())
-//                throw new IOException(String.format("Unsuccessful attempt exporting metrics to thanos receiver: %s due to: ", thanosReceiveUrl) + response);
-//        } catch (Throwable e) {
-//            throw new RuntimeException(String.format("Failed to export metrics to thanos endpoint: %s due to exception: ", thanosReceiveUrl), e);
-//        }
-//    }
+    private void postMetricsToThanos(WriteRequestOuterClass.WriteRequest writeRequest) throws IOException {
 
+        byte[] compressedData = compressedData(writeRequest.toByteArray());
+
+        RequestBody body = RequestBody.create(compressedData, MediaType.parse("application/x-protobuf"));
+
+        Request request = new Request.Builder()
+                .url(thanosReceiveUrl)
+                .post(body)
+                .addHeader("Content-Type", "application/x-protobuf")
+                .build();
+
+        try (Response response = okHttpClient.newCall(request).execute()) {
+            if (!response.isSuccessful())
+                throw new IOException(String.format("Unsuccessful attempt exporting metrics to thanos receiver: %s due to: ", thanosReceiveUrl) + response);
+        } catch (Throwable e) {
+            throw new RuntimeException(String.format("Failed to export metrics to thanos endpoint: %s due to exception: ", thanosReceiveUrl), e);
+        }
+    }
 
     /* Convert String metrics to protobuf format */
     private WriteRequestOuterClass.WriteRequest convertMetricsToProtobuf(String metrics) {
