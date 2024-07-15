@@ -4,8 +4,6 @@ import com.prometheus.thanos.exporter.poc.WriteRequestOuterClass;
 import io.micrometer.core.instrument.Clock;
 import io.micrometer.core.ipc.http.HttpSender;
 import io.micrometer.core.ipc.http.HttpUrlConnectionSender;
-import okhttp3.*;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,14 +16,11 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 @Component
 public class ScheduledMetricsExporter {
     private static final Logger LOGGER = LoggerFactory.getLogger(ScheduledMetricsExporter.class);
-
-    private final OkHttpClient okHttpClient;
     private final HttpSender httpClient;
 
     @Value("${thanos.receive.url}")
@@ -42,7 +37,6 @@ public class ScheduledMetricsExporter {
     public ScheduledMetricsExporter(Clock clock) {
         this.clock = clock;
         httpClient = new HttpUrlConnectionSender();
-        okHttpClient = new OkHttpClient();
     }
 
     @Scheduled(fixedRateString = "${scheduler.fixedRate}", initialDelayString = "${scheduler.initialDelay}")
@@ -51,13 +45,11 @@ public class ScheduledMetricsExporter {
             long startTime = clock.monotonicTime();
             LOGGER.debug("Schedule trigger for exporting metrics started");
 
-             String metrics = fetchPrometheusMetricsViaHttpSender();
-           // String metrics = fetchPrometheusMetricsViaHttpOkClient();
+            String metrics = fetchPrometheusMetricsViaHttpSender();
 
             WriteRequestOuterClass.WriteRequest writeRequest = convertMetricsToProtobuf(metrics);
 
             postMetricsToThanosViaHttpSender(writeRequest);
-            //postMetricsToThanosViaHttpSender(writeRequest);
 
             LOGGER.info("Schedule trigger for exporting metrics took={}ms", calculateFinishTime(startTime));
         } else {
@@ -65,7 +57,6 @@ public class ScheduledMetricsExporter {
         }
     }
 
-    @NotNull
     private Double calculateFinishTime(long startTime) {
         long durationNs = clock.monotonicTime() - startTime;
         return (Double) (double) TimeUnit.NANOSECONDS.toMillis(durationNs);
@@ -115,42 +106,9 @@ public class ScheduledMetricsExporter {
         }
     }
 
-    /* Fetch Prometheus metrics exposed locally, using HttpOkClient it works */
-    private String fetchPrometheusMetricsViaHttpOkClient() {
-        Request request = new Request.Builder().url(prometheusUrl).build();
-
-        try (Response response = okHttpClient.newCall(request).execute()) {
-            if (!response.isSuccessful())
-                throw new IOException(String.format("Unsuccessful attempt when fetching metrics from: %s due to: ", prometheusUrl) + response);
-            return Objects.requireNonNull(response.body()).string();
-        } catch (Throwable e) {
-            throw new RuntimeException(String.format("Failed to fetch metrics from endpoint: %s", prometheusUrl), e);
-        }
-    }
-
-    private void postMetricsToThanos(WriteRequestOuterClass.WriteRequest writeRequest) throws IOException {
-
-        byte[] compressedData = compressedData(writeRequest.toByteArray());
-
-        RequestBody body = RequestBody.create(compressedData, MediaType.parse("application/x-protobuf"));
-
-        Request request = new Request.Builder()
-                .url(thanosReceiveUrl)
-                .post(body)
-                .addHeader("Content-Type", "application/x-protobuf")
-                .build();
-
-        try (Response response = okHttpClient.newCall(request).execute()) {
-            if (!response.isSuccessful())
-                throw new IOException(String.format("Unsuccessful attempt exporting metrics to thanos receiver: %s due to: ", thanosReceiveUrl) + response);
-        } catch (Throwable e) {
-            throw new RuntimeException(String.format("Failed to export metrics to thanos endpoint: %s due to exception: ", thanosReceiveUrl), e);
-        }
-    }
-
-    /* Convert String metrics to protobuf format */
+    /* Parse and convert the metrics to the WriteRequest protobuf format */
     private WriteRequestOuterClass.WriteRequest convertMetricsToProtobuf(String metrics) {
-        // Parse and convert the metrics to the WriteRequest protobuf format
+
         List<WriteRequestOuterClass.TimeSeries> timeSeriesList = parseMetrics(metrics);
 
         return WriteRequestOuterClass.WriteRequest.newBuilder()
