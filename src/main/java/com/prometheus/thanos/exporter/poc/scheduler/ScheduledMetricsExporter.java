@@ -39,7 +39,7 @@ public class ScheduledMetricsExporter {
         httpClient = new HttpUrlConnectionSender();
     }
 
-    @Scheduled(fixedRate = 5000) //nice to configure the scheduler time
+    @Scheduled(fixedRateString = "${scheduler.fixedRate}", initialDelayString = "${scheduler.initialDelay}")
     public void reportCurrentTime() throws IOException {
 
         long startTime = clock.monotonicTime();
@@ -65,14 +65,18 @@ public class ScheduledMetricsExporter {
     private String fetchPrometheusMetricsViaHttpSender() {
         try {
             HttpSender.Request.Builder requestBuilder = httpClient.get(URI.create(prometheusUrl).toString());
-            HttpSender.Response response1 = requestBuilder
-                    .send()
-                    .onSuccess(response -> LOGGER.info("Httpclient: Successfully fetch metrics from={}, response={}", prometheusUrl, response.isSuccessful()));
-            return response1.body();
+            HttpSender.Response response = requestBuilder
+                    .send();
+            if (response.isSuccessful()) {
+                LOGGER.debug("Httpclient: Successfully fetched metrics from local prometheusEndpoint");
+            } else if (!response.isSuccessful()) {
+                LOGGER.error("Failed to fetch metrics from prometheus endpoint={} with responseCode={}  and responseBody={}", prometheusUrl, response.code(), response.body());
+            }
+            return response.body();
         } catch (MalformedURLException e) {
             throw new IllegalArgumentException("Malformed fetch endpoint", e);
         } catch (Throwable e) {
-            throw new IllegalStateException(String.format("failed to fetch metrics from prometheus endpoint: %s", prometheusUrl), e);
+            throw new RuntimeException(String.format("Integration issue with prometheus fetch endpoint: %s", prometheusUrl), e);
         }
 
     }
@@ -85,16 +89,19 @@ public class ScheduledMetricsExporter {
         try {
             HttpSender.Request.Builder requestBuilder = httpClient.post(thanosReceiveUrl);
 
-            requestBuilder
-                    .withContent(org.springframework.http.MediaType.APPLICATION_PROTOBUF.getType(), compressedData)
-                    .compressWhen(() -> false)
-                    .send()
-                    .onSuccess(response -> LOGGER.info("Httpclient: Successfully send metrics to thanos={}, response={}", thanosReceiveUrl, response.body()))
-                    .onError(response -> LOGGER.error("failed to send metrics to thanos endpoint: {}, error: {}", thanosReceiveUrl, response.body()));
+            HttpSender.Response response = requestBuilder
+                    //  .withContent(MediaType.ALL_VALUE, compressedData)
+                    .withContent("application/x-protobuf", compressedData)
+                    .send();
+            if (response.isSuccessful()) {
+                LOGGER.debug("Httpclient: Successfully exported metrics to thanos");
+            } else {
+                LOGGER.error("Failed to export metrics to thanos endpoint={}, responseCode={} responseBody={}", thanosReceiveUrl, response.code(), response.body());
+            }
         } catch (MalformedURLException e) {
             throw new IllegalArgumentException("Malformed thanos publishing endpoint", e);
         } catch (Throwable e) {
-            throw new IllegalStateException(String.format("failed to send metrics to thanos endpoint: %s", thanosReceiveUrl), e);
+            throw new RuntimeException(String.format("Integration issue with thanos export endpoint: %s due to e: ", thanosReceiveUrl), e);
         }
     }
 
@@ -152,6 +159,7 @@ public class ScheduledMetricsExporter {
     }
 
     private List<WriteRequestOuterClass.TimeSeries> parseMetrics(String metrics) {
+        LOGGER.debug("Parsing prometheus data to proto before exporting to thanos");
         List<WriteRequestOuterClass.TimeSeries> timeSeriesList = new ArrayList<>();
 
         String[] lines = metrics.split("\n");
@@ -205,12 +213,12 @@ public class ScheduledMetricsExporter {
 
             timeSeriesList.add(timeSeriesBuilder.build());
         }
-
         return timeSeriesList;
     }
 
     /* Using Snappy lib for compress the data before sending as Snappy compression enabled server side */
     private byte[] compressedData(byte[] input) throws IOException {
+        LOGGER.debug("Compressing data using Snappy");
         return Snappy.compress(input);
     }
 }

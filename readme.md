@@ -8,13 +8,13 @@ machines. Recommend proper testing correct optimizations as per your case.
 Few options have been tried under this POC
 
 ### Option 1, APP(Springboot-promMetrics) -> PromSever -> thanos receiver
-See option 1 at TBA project link
+See Prometheus.yml for configuration like labels and such. Enable from Docker compose file. 
 
 ### Option 2, APP(Springboot-otelMetrics) -> OTEL collector -> thanos receiver
 See option 3 at TBA project link
 
 ### Option 3, APP(Springboot-promMetrics) -> ThanosExporterLib -> thanos receiver
-Explored here as Library POC in this code base
+Explored here as Library POC in this code base. Configuration in docker compose, see specific label related. Enables disable from application.properties file.
 
 ### Option 4, APP(Springboot-promMetrics) -> telegraph -> thanos receiver
 TBA

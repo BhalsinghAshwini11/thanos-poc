@@ -6,7 +6,8 @@ scrape_configs:
   - job_name: 'prometheusLocal'
     metrics_path: '/prometheus'
     static_configs:
-      - targets: [ 'localhost:8080' ]
+      - targets: [ 'host.docker.internal:8080' ]
 
 remote_write:
-  - url: 'http://thanos-receive:10901/api/v1/receive'
+  - url: 'http://thanos-receive:10908/api/v1/receive'
+    name: 'prometheusLocalExporter'

@@ -1,41 +1,43 @@
 services:
-#  app:
-#    build: ./
-#    ports:
-#      - "8080:8080"
-#    depends_on:
-#      - thanos-receive
-#    networks:
-#      - thanos-network
-#  prometheus: ##TODO , do not work some malformed req/res error when connecting to local thanos
-#    image: prom/prometheus:latest
-#    volumes:
-#      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-#    command:
-#      - --config.file=/etc/prometheus/prometheus.yml
-#    ports:
-#      - "9090:9090"
-#    networks:
-#      - thanos-network
+  app:
+    build: ./
+    ports:
+      - "8080:8080"
+    depends_on:
+      - thanos-receive
+    networks:
+      - thanos-network
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - thanos-network
   thanos-receive:
     image: quay.io/thanos/thanos:v0.31.0
     container_name: thanos-receive
     command:
       - receive
-      - --receive.local-endpoint=0.0.0.0:10901
+      - --receive.local-endpoint=thanos-receive:10907
       - --tsdb.path=/var/thanos/receive
       - --log.level=debug
       - --log.format=logfmt
       - --label=receive_replica="0"
       - --label=receive_cluster="local"
-      - --grpc-address=0.0.0.0:10901
-      - --http-address=0.0.0.0:10902
+      - --label=exporterName="exporter-app-ashbha"
+      - --grpc-address=0.0.0.0:10907
+      - --http-address=0.0.0.0:10909
       - --receive.grpc-compression=snappy
       - --receive.hashrings-file=/etc/thanos/hashring.json
       - --remote-write.address=0.0.0.0:10908
     ports:
-      - "10901:10901"
-      - "10902:10902"
+      - "10907:10907"
+      - "10908:10908"
+      - "10909:10909"
     volumes:
       - ./hashring.json:/etc/thanos/hashring.json
       - thanos-receive-data:/var/thanos/receive
@@ -46,8 +48,8 @@ services:
     command:
       - query
       - --http-address=0.0.0.0:10902
-      - --store=thanos-receive:10901
-      - --log.level=debug
+      - --store=thanos-receive:10907
+      - --log.level=info
     ports:
       - "9091:10902"
     networks:
@@ -75,4 +77,4 @@ volumes:
   thanos-receive-data:
   thanos-store-data:
 
-# Local Thanos http://localhost:9091
+# Local Thanos Querier http://localhost:9091
